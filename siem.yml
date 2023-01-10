@@ -1,0 +1,175 @@
+version: '3.8'
+services:
+  es01:
+    build: ./elasticsearch/
+    hostname: es01
+    container_name: es01
+    environment:
+      ES_JAVA_OPTS: -Xms512m -Xmx512m
+    restart: on-failure
+    volumes:
+      - data01:/usr/share/elasticsearch/data
+    ports:
+      - 9200:9200
+    networks:
+      - elk
+
+  log01:
+    build: ./logstash/
+    hostname: log01
+    container_name: log01
+    restart: on-failure
+    ports:
+      - 5044:5044
+      - 50000:50000/tcp
+      - 50000:50000/udp
+      - 9600:9600
+    networks:
+      - elk
+    depends_on:
+      - es01
+
+  kib01:
+    build: ./kibana/
+    hostname: kib01
+    container_name: kib01
+    restart: on-failure
+    networks:
+      - elk
+    depends_on:
+      - es01
+
+  fleet-server:
+    build: ./fleet-server/
+    container_name: fleet-server
+    hostname: fleet-server
+    restart: on-failure
+    environment:
+      FLEET_SERVER_ENABLE: 1
+      FLEET_SERVER_INSECURE_HTTP: 1
+      FLEET_SERVER_POLICY_ID: fleet-server-policy
+      FLEET_SERVER_ELASTICSEARCH_HOST: "http://es01:9200"
+      KIBANA_HOST: "http://kib01:5601"
+      KIBANA_FLEET_SETUP: 1
+      FLEET_SERVER_SERVICE_TOKEN: "AAEAAWVsYXN0aWMvZmxlZXQtc2VydmVyL2ZsZWV0LXNlcnZlci10b2tlbjpOenBqakhibFRLMjdoejFDd0NQTThR"
+    ports:
+      - 8220:8220
+    networks:
+      - elk
+    depends_on:
+      - es01
+      - kib01
+
+  apm02:
+    build: ./fleet-agent/
+    container_name: apm02
+    hostname: apm02
+    restart: on-failure
+    environment:
+      FLEET_ENROLL: 1
+      FLEET_INSECURE: 1
+      FLEET_URL: http://fleet-server:8220
+      KIBANA_HOST: "http://kib01:5601"
+      FLEET_ENROLLMENT_TOKEN: "NUxPa1RZVUJJcGJMbHRIWjZIcUI6UnN5S1RSR2ZSa1NPNFNGUElmX21ZZw=="
+    depends_on:
+      - fleet-server
+    networks:
+      - elk
+
+  fb01:
+    build: ./filebeat/
+    container_name: fb01
+    hostname: fb01
+    #command: filebeat -e -strict.perms=false
+    restart: on-failure
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+    depends_on:
+      - es01
+      - kib01
+    networks:
+      - elk
+
+  ############################################################
+  ## APPS
+  ############################################################
+
+  pg01:
+    image: postgres:latest
+    hostname: pg01
+    container_name: pg01
+    restart: always
+    environment:
+      - POSTGRES_DB=postgres
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+    networks:
+      - elk
+
+  django:
+    build:
+      context: ./app_django
+      dockerfile: django.Dockerfile
+    container_name: django
+    hostname: django
+    restart: always
+    command: gunicorn django_demo.wsgi:application --bind 0.0.0.0:8000
+    environment:
+      - POSTGRES_NAME=postgres
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+    depends_on:
+      - pg01
+    networks:
+      - elk
+  
+  nginx:
+    container_name: nginx
+    restart: always
+    hostname: nginx
+    build: ./nginx
+    ports:
+      - 80:80
+    depends_on:
+      - kib01
+      - django
+    networks:
+      - elk
+
+  ############################################################
+  ## CLIENTS
+  ############################################################
+
+  client01:
+    container_name: client01
+    restart: always
+    build: ./client
+    command: /bin/bash client_demo.sh
+    depends_on:
+      - nginx
+    networks:
+      - elk
+  
+  client02:
+    container_name: client02
+    restart: always
+    build: ./client
+    command: /bin/bash client_demo.sh
+    depends_on:
+      - nginx
+    networks:
+      - elk
+
+volumes:
+  data01:
+    driver: local
+  # fleet-server:
+  # apm-server:
+  # pg01:
+
+networks:
+  elk:
+    driver: bridge
+    driver_opts:
+      com.docker.network.bridge.enable_icc: "true"

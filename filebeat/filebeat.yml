@@ -1,0 +1,43 @@
+filebeat.config:
+  modules:
+    path: ${path.config}/modules.d/*.yml # enable all modules (nginx, kafka, redis, etc)
+    reload.enabled: false
+
+filebeat.autodiscover: # auto-discover tagged docker container
+   providers:
+    - type: docker
+      hints.enabled: true
+      templates:
+        - condition:
+            contains:
+              docker.container.image: nginx
+          config:
+            - module: nginx
+              access:
+                enabled: true
+                input:
+                  type: container
+                  paths:
+                    - /var/lib/docker/containers/${data.docker.container.id}/*.log
+                  stream: stdout
+              error:
+                enabled: true
+                input:
+                  type: container
+                  paths:
+                    - /var/lib/docker/containers/${data.docker.container.id}/*.log
+                  stream: stderr
+
+setup:
+  kibana.host: "http://kib01:5601"
+  dashboards.enable: true
+
+# processors:
+# - add_cloud_metadata: ~ # for AWS, GCO, Azure etc.
+# - add_docker_metadata: ~ # add docker metadata (container id, name, image and labels)
+
+output.elasticsearch:
+  hosts: [ "http://es01:9200" ]
+  username: 'filebeat_internal'
+  password: 'siem-contrasenya'
+  #api_key: "AAEAAWVsYXN0aWMvZmxlZXQtc2VydmVyL2ZiMDEtdG9rZW46UlNueGNQOFVUaTI5eG91bnNjRnVNQQ"
